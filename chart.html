@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <title>График проектов</title>
+  <title>График проектов — Firestore</title>
   <script src="https://www.gstatic.com/charts/loader.js"></script>
   <style>
     body { font-family: Arial, sans-serif; margin: 16px; }
@@ -15,46 +15,78 @@
 <body>
   <h2>График проектов</h2>
   <div class="actions">
-    <button onclick="window.location.href='index.html'">Назад к вводу</button>
-    <button id="btnRefresh">Обновить</button>
+    <button type="button" onclick="window.location.href='index.html'">Назад к вводу</button>
+    <button type="button" id="btnRefresh">Обновить</button>
   </div>
   <div id="msg" class="warn"></div>
-  <div id="chart_div"></div>
+  <div id="chart_div" aria-label="Диаграмма Ганта"></div>
 
-  <script>
+  <script type="module">
+    // Firebase SDK (модульная версия)
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
+    import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js";
+
+    // ВСТАВЬ СВОЙ КОНФИГ ИЗ FIREBASE (Project settings → Your apps → Web)
+   const firebaseConfig = {
+        apiKey: "AIzaSyBhVal8xu6ORv8bhQZ3zti__wX4x6MzFjE",
+        authDomain: "ingvar-projects-gantt.firebaseapp.com",
+        projectId: "ingvar-projects-gantt",
+        storageBucket: "ingvar-projects-gantt.firebasestorage.app",
+        messagingSenderId: "20236808968",
+        appId: "1:20236808968:web:0895f9a51283eb5369f2bd",
+        measurementId: "G-LX5GK03QB7"
+    };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // Состояние
+    let chartsReady = false;
+    let tableRows = null; // массив массивов (таблица)
+
+    // Загружаем Google Charts (пакет Gantt)
     google.charts.load('current', { packages: ['gantt'] });
-    google.charts.setOnLoadCallback(drawFromStorage);
+    google.charts.setOnLoadCallback(() => { chartsReady = true; maybeDraw(); });
 
+    // Утилиты
     function toNum(v) {
       const n = parseFloat(v);
       return Number.isFinite(n) ? n : 0;
     }
 
-    function drawFromStorage() {
+    // Авторизация (на случай, если правила требуют auth != null)
+    async function signIn() {
+      try { await signInAnonymously(auth); } catch { /* ок, если публичное чтение */ }
+    }
+
+    // Чтение данных из Firestore: коллекция "projects", документ "main", поле "table"
+    async function fetchData() {
       const msg = document.getElementById('msg');
       msg.textContent = '';
-
-      const saved = localStorage.getItem('projectsData');
-      if (!saved) {
-        msg.textContent = 'Нет сохранённых данных. Перейдите на страницу ввода.';
-        return;
-      }
-
-      let rows = [];
       try {
-        rows = JSON.parse(saved);
-        if (!Array.isArray(rows)) rows = [];
-      } catch {
-        rows = [];
+        const snap = await getDoc(doc(db, "projects", "main"));
+        if (!snap.exists()) {
+          msg.textContent = "В Firestore нет документа projects/main.";
+          tableRows = [];
+          return;
+        }
+        const data = snap.data();
+        tableRows = Array.isArray(data.table) ? data.table : [];
+      } catch (e) {
+        console.error(e);
+        msg.textContent = "Ошибка чтения из Firestore. Проверь конфиг и правила доступа.";
+        tableRows = [];
       }
+    }
 
-      if (rows.length === 0) {
-        msg.textContent = 'Данные пусты. Перейдите на страницу ввода.';
-        return;
-      }
-
+    // Построение массива для диаграммы
+    function buildChartData(rows) {
       const chartData = [];
+
       rows.forEach((r, idx) => {
+        // Ожидается формат строки:
+        // [name, start, end, sumStr, advDateStr, advPercStr, discPercStr]
         const [name, start, end, sumStr, advDateStr, advPercStr, discPercStr] = r;
 
         const projName = (name || `Проект ${idx + 1}`).trim();
@@ -67,9 +99,11 @@
 
         if (!startDate || !endDate || isNaN(startDate) || isNaN(endDate)) return;
 
+        // Платёж через 15 дней после окончания проекта
         const paymentDate = new Date(endDate);
         paymentDate.setDate(paymentDate.getDate() + 15);
 
+        // Вычеты
         const discAmt = discPerc > 0 ? sum * (discPerc / 100) : 0;
         const advAmt = advPerc > 0 ? sum * (advPerc / 100) : 0;
         const finalSum = sum - discAmt - advAmt;
@@ -88,8 +122,8 @@
           null
         ]);
 
-        // Аванс
-        if (advDate && advAmt > 0) {
+        // Аванс (если задана дата и сумма > 0) — зависимость от проекта
+        if (advDate && !isNaN(advDate) && advAmt > 0) {
           const advEnd = new Date(advDate);
           advEnd.setDate(advEnd.getDate() + 1);
           chartData.push([
@@ -104,7 +138,7 @@
           ]);
         }
 
-        // Поступление
+        // Поступление — зависимость от проекта
         const payEnd = new Date(paymentDate);
         payEnd.setDate(payEnd.getDate() + 1);
         chartData.push([
@@ -119,15 +153,17 @@
         ]);
       });
 
-      if (chartData.length === 0) {
-        msg.textContent = 'Не нашлось валидных строк для построения.';
+      return chartData;
+    }
+
+    // Отрисовка диаграммы
+    function drawChart(chartData) {
+      const msg = document.getElementById('msg');
+      if (!chartData || chartData.length === 0) {
+        msg.textContent = 'Нет валидных строк для построения диаграммы.';
         return;
       }
 
-      drawChart(chartData);
-    }
-
-    function drawChart(chartData) {
       const data = new google.visualization.DataTable();
       data.addColumn('string', 'Task ID');
       data.addColumn('string', 'Task Name');
@@ -145,10 +181,10 @@
         gantt: {
           trackHeight: 50,
           arrow: {
-            angle: 0,
-            width: 0,
-            color: 'transparent',
-            radius: 0    // квадратные углы
+            angle: 0,       // горизонтальные сегменты
+            width: 2,       // видимые линии
+            color: '#555',  // цвет стрелок
+            radius: 0       // квадратные углы
           },
           palette: [
             { color: '#4a90e2', dark: '#2c5aa0', light: '#a1c4f4' }, // Проект
@@ -162,8 +198,24 @@
       chart.draw(data, options);
     }
 
-    document.getElementById('btnRefresh').addEventListener('click', drawFromStorage);
+    // Сборка: ждём авторизацию, данные и загрузку чартов
+    async function refresh() {
+      document.getElementById('msg').textContent = '';
+      await signIn();
+      await fetchData();
+      maybeDraw();
+    }
+
+    function maybeDraw() {
+      if (!chartsReady || !Array.isArray(tableRows)) return;
+      const chartData = buildChartData(tableRows);
+      drawChart(chartData);
+    }
+
+    // Первая загрузка + кнопка "Обновить"
+    refresh();
+    document.getElementById('btnRefresh').addEventListener('click', refresh);
   </script>
 </body>
 </html>
-
+```
