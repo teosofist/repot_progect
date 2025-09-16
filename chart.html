@@ -141,7 +141,7 @@
       data.addRows(chartData);
 
       const options = {
-        height: 720,
+       height: chartData.length * 60, // 60px на строку,
         gantt: {
           trackHeight: 50,
           arrow: {
