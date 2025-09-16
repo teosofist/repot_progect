@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <title>Ввод данных по проектам — Firestore</title>
+  <title>Ввод данных по проектам</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 16px; }
     table { border-collapse: collapse; margin-bottom: 12px; width: 100%; max-width: 1200px; }
@@ -39,49 +39,31 @@
 
   <div class="actions">
     <button id="btnAdd">Добавить проект</button>
-    <button id="btnSave">Сохранить</button>
     <button id="btnGoChart">Построить график</button>
+    <button id="btnClear">Очистить данные</button>
   </div>
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
-    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
-    import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js";
-
-    // 🔹 ВСТАВЬ СВОЙ КОНФИГ ИЗ FIREBASE
-    const firebaseConfig = {
-        apiKey: "AIzaSyBhVal8xu6ORv8bhQZ3zti__wX4x6MzFjE",
-        authDomain: "ingvar-projects-gantt.firebaseapp.com",
-        projectId: "ingvar-projects-gantt",
-        storageBucket: "ingvar-projects-gantt.firebasestorage.app",
-        messagingSenderId: "20236808968",
-        appId: "1:20236808968:web:0895f9a51283eb5369f2bd",
-        measurementId: "G-LX5GK03QB7"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-
-    async function signIn() {
-      await signInAnonymously(auth).catch(() => {});
-    }
-
+  <script>
     function attachListeners(row) {
       row.querySelectorAll('input').forEach(inp => {
-        inp.addEventListener('input', () => {});
+        inp.addEventListener('input', saveTableData);
       });
     }
 
-    function readTable() {
-      return Array.from(document.querySelectorAll('#projectsTable tr')).slice(1)
-        .map(row => Array.from(row.querySelectorAll('input')).map(inp => inp.value || ''));
+    function saveTableData() {
+      const rows = Array.from(document.querySelectorAll('#projectsTable tr')).slice(1);
+      const data = rows.map(r => Array.from(r.querySelectorAll('input')).map(i => i.value || ''));
+      localStorage.setItem('projectsData', JSON.stringify(data));
     }
 
-    function writeTable(data) {
+    function loadTableData() {
+      const saved = localStorage.getItem('projectsData');
       const table = document.getElementById('projectsTable');
       while (table.rows.length > 1) table.deleteRow(1);
-      if (!data || data.length === 0) { addRow(); return; }
+      if (!saved) { addRow(); return; }
+      let data = [];
+      try { data = JSON.parse(saved); if (!Array.isArray(data)) data = []; } catch { data = []; }
+      if (data.length === 0) { addRow(); return; }
       data.forEach(rowData => {
         const row = table.insertRow();
         for (let i = 0; i < 7; i++) {
@@ -108,32 +90,24 @@
         cell.appendChild(input);
       }
       attachListeners(row);
+      saveTableData();
     }
 
-    async function saveToFirestore() {
-      const data = readTable();
-      await setDoc(doc(db, "projects", "main"), { table: data });
-      alert("Данные сохранены в Firestore");
-    }
-
-    async function loadFromFirestore() {
-      const snap = await getDoc(doc(db, "projects", "main"));
-      if (snap.exists()) {
-        writeTable(snap.data().table);
-      } else {
-        addRow();
-      }
+    function clearData() {
+      localStorage.removeItem('projectsData');
+      const table = document.getElementById('projectsTable');
+      while (table.rows.length > 1) table.deleteRow(1);
+      addRow();
     }
 
     document.getElementById('btnAdd').addEventListener('click', addRow);
-    document.getElementById('btnSave').addEventListener('click', saveToFirestore);
-    document.getElementById('btnGoChart').addEventListener('click', async () => {
-      await saveToFirestore();
+    document.getElementById('btnClear').addEventListener('click', clearData);
+    document.getElementById('btnGoChart').addEventListener('click', () => {
+      saveTableData();
       window.location.href = 'chart.html';
     });
 
-    await signIn();
-    await loadFromFirestore();
+    loadTableData();
   </script>
 </body>
 </html>
