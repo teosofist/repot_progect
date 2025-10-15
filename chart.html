@@ -68,7 +68,7 @@
         if (!startDate || !endDate || isNaN(startDate) || isNaN(endDate)) return;
 
         const paymentDate = new Date(endDate);
-        paymentDate.setDate(paymentDate.getDate() + 15);
+        paymentDate.setDate(paymentDate.getDate() + 21);
 
         const discAmt = discPerc > 0 ? sum * (discPerc / 100) : 0;
         const advAmt = advPerc > 0 ? sum * (advPerc / 100) : 0;
